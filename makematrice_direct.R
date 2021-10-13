@@ -1,0 +1,301 @@
+library(sf)
+library(tidyverse)
+library(readxl)
+library(kableExtra)
+library(ggiraph)
+library(haven)
+library(labelled)
+library(openxlsx)
+
+#Enter in name of country/code
+ADMIN0Name_value <- "Nigeria"
+adm0_pcod_value <- "NG"
+
+#1 - import data 
+dataset <- read_sav("3_ProcessedData/exampledataFrancais_processed_plus.sav")
+
+#2 - create admin codes variable which will store p-codes and then set  everything else to label except for the admin codes
+dataset <- dataset %>% mutate(adm1_Pcod = ADMIN1Name, adm2_Pcod = ADMIN2Name)
+dataset <- dataset %>% set_value_labels(adm1_Pcod = NULL, adm2_Pcod = NULL) %>% to_factor()
+
+#3 - calculate CH proportions/phases - how to make it so if country doesnt collect indicator (like HHS) then dont run it
+#Household Hunger Score
+#convert to CH phases
+dataset <- dataset %>% mutate(CH_HHS = case_when(
+  HHS == 0 ~ "Phase1",
+  HHS == 1 ~ "Phase2",
+  HHS %in% c(2,3) ~ "Phase3",
+  HHS == 4 ~ "Phase4",
+  HHS >= 5 ~ "Phase5"))
+#calculate % of households in phases and then final phase
+CH_HHS_table_wide <- dataset %>% group_by(ADMIN1Name, adm1_Pcod, ADMIN2Name, adm2_Pcod) %>%
+  drop_na(CH_HHS) %>%
+  count(CH_HHS, wt = WeightHH) %>%
+  mutate(perc = 100 * n / sum(n)) %>%
+  ungroup() %>% select(-n) %>%
+  pivot_wider(names_from = CH_HHS,
+              values_from = perc,
+              values_fill = list(perc = 0)) %>%
+  mutate_if(is.numeric, round, 1) %>%
+  mutate(phase2345 = `Phase2` + `Phase3` + `Phase4` + `Phase5`,
+         phase345 = `Phase3` + `Phase4` + `Phase5`,
+         phase45 = `Phase4` + `Phase5`,
+         HHS_finalphase = case_when(
+           Phase5 >= 20 ~ 5,
+           Phase4 >= 20 | phase45 >= 20 ~ 4,
+           Phase3 >= 20 | phase345 >= 20 ~ 3,
+           Phase2 >= 20 | phase2345 >= 20 ~ 2,
+           TRUE ~ 1)) %>%
+  select(ADMIN1Name, adm1_Pcod, ADMIN2Name, adm2_Pcod, HHS_Phase1 = Phase1, HHS_Phase2 = Phase2, HHS_Phase3 = Phase3, HHS_Phase4 = Phase4, HHS_Phase5 = Phase5, HHS_finalphase)
+
+#rCSI
+#convert to CH phases
+dataset <- dataset %>% mutate(CH_rCSI = case_when(
+  rCSI <= 3 ~ "Phase1",
+  between(rCSI,4,18) ~ "Phase2",
+  rCSI >= 19 ~ "Phase3"))
+#calculate % of households in phases and then final phase
+CH_rCSI_table_wide <- dataset %>%
+  group_by(ADMIN1Name, adm1_Pcod, ADMIN2Name, adm2_Pcod) %>%
+  drop_na(CH_rCSI) %>%
+  count(CH_rCSI, wt = WeightHH) %>%
+  mutate(perc = 100 * n / sum(n)) %>%
+  ungroup() %>% select(-n) %>%
+  pivot_wider(names_from = CH_rCSI,
+              values_from = perc,
+              values_fill = list(perc = 0)) %>%
+  replace(., is.na(.), 0)  %>% mutate_if(is.numeric, round, 1) %>%
+  mutate(rcsi23 = Phase2 + Phase3,
+         rCSI_finalphase =
+           case_when(
+             Phase3 >= 20 ~ 3,
+             Phase2 >= 20 | rcsi23 >= 20 ~ 2,
+             TRUE ~ 1)) %>%
+  select(ADMIN1Name, adm1_Pcod, ADMIN2Name, adm2_Pcod, rCSI_Phase1 = Phase1, rCSI_Phase2 = Phase2, rCSI_Phase3 = Phase3, rCSI_finalphase)
+
+#Food Consumption Groups
+#make table of % in food consumption Groups - make sure to use correct threshold FCSCat21 or FCSCat28
+CH_FCSCat_table_wide <- dataset %>%
+  drop_na(FCSCat21) %>%
+  group_by(ADMIN1Name, adm1_Pcod, ADMIN2Name, adm2_Pcod) %>%
+  count(FCSCat = FCSCat21,  wt = WeightHH) %>%
+  mutate(perc = 100 * n / sum(n)) %>%
+  ungroup() %>% select(-n) %>%
+  pivot_wider(names_from = FCSCat,
+              values_from = perc,
+              values_fill = list(perc = 0)) %>%
+  replace(., is.na(.), 0)  %>% mutate_if(is.numeric, round, 1) %>%
+  #Apply the Cadre Harmonise rules for phasing the Food Consumption Groups
+  mutate(PoorBorderline = Pauvre + Limite, FCG_finalphase = case_when(
+    Pauvre < 5 ~ 1,  #if less than 5% are in the poor food group then phase 1
+    Pauvre >= 20 ~ 4, #if 20% or more are in the poor food group then phase 4
+    between(Pauvre,5,10) ~ 2, #if % of people are between 5 and 10%  then phase2
+    between(Pauvre,10,20) & PoorBorderline < 30 ~ 2, #if % of people in poor food group are between 20 and 20% and the % of people who are in poor and borderline is less than 30 % then phase2
+    between(Pauvre,10,20) & PoorBorderline >= 30 ~ 3)) %>% #if % of people in poor food group are between 20 and 20% and the % of people who are in poor and borderline is less than 30 % then phase2
+  select(ADMIN1Name, adm1_Pcod, ADMIN2Name, adm2_Pcod, FCG_Poor = Pauvre, FCG_Borderline = Limite, FCG_Acceptable = Acceptable, FCG_finalphase) #select only relevant variables and order in proper sequence
+
+
+#Household Dietary Diversity Score
+#convert to CH phases
+dataset <- dataset %>% mutate(CH_HDDS = case_when(
+  HDDS >= 5 ~ "Phase1",
+  HDDS == 4 ~ "Phase2",
+  HDDS == 3 ~ "Phase3",
+  HDDS == 2 ~ "Phase4",
+  HDDS < 2 ~ "Phase5"))
+#calculate % of households in phases and then final phase
+CH_HDDS_table_wide  <- dataset %>%
+  drop_na(CH_HDDS) %>%
+  group_by(ADMIN1Name, adm1_Pcod, ADMIN2Name, adm2_Pcod) %>%
+  count(CH_HDDS, wt = WeightHH) %>%
+  mutate(perc = 100 * n / sum(n)) %>%
+  ungroup() %>% select(-n) %>%
+  pivot_wider(names_from = CH_HDDS,
+              values_from = perc,
+              values_fill = list(perc = 0)) %>%
+  mutate_if(is.numeric, round, 1) %>%
+  #Apply the 20% rule (if it is 20% in that phase or the sum of higher phases equals 20%)
+  mutate(
+    phase2345 = `Phase2` + `Phase3` + `Phase4` + `Phase5`, #this variable will be used to see if phase 2 and higher phases equals 20                                 phase345 = `Phase3` + `Phase4` + `Phase5`, #this variable will be used to see if phase 3 and higher phases equal 20% or more
+    phase345 = `Phase3` + `Phase4` + `Phase5`,
+    phase45 = `Phase4` + `Phase5`, #this variable will be used to see if phase 3 and higher phases equal 20% or more
+    HDDS_finalphase = case_when(
+      `Phase5` >= 20 ~ 5, #if 20% or more is in phase 5 then assign phase 5
+      `Phase4` >= 20 | phase45 >= 20 ~ 4, #if 20% or more is in phase 4 or the sum of phase4 and 5 is more than 20% then assign phase 4
+      `Phase3` >= 20 | phase345 >= 20 ~ 3, #if 20% or more is in phase 3 or the sum of phase3, 4 and 5 is more than 20% then assign phase 3
+      `Phase2` >= 20 | phase2345 >= 20 ~ 2, #if 20% or more is in phase 2 or the sum of phase 2, 3, 4 and 5 is more than 20% then assign phase 2
+      TRUE ~ 1)) %>% #otherwise assign phase 1
+  select(ADMIN1Name, adm1_Pcod, ADMIN2Name, adm2_Pcod, HDDS_Phase1 = Phase1, HDDS_Phase2 = Phase2, HDDS_Phase3 = Phase3, HDDS_Phase4 = Phase4, HDDS_Phase5 = Phase5, HDDS_finalphase) #select only relevant variables, rename them with indicator name and order in proper sequence
+
+
+#Livelihood Coping Strategies
+CH_LhCSICat_table_wide <- dataset %>%
+  drop_na(LhCSICat) %>%
+  group_by(ADMIN1Name, adm1_Pcod, ADMIN2Name, adm2_Pcod) %>%
+  count(LhCSICat, wt = WeightHH) %>%
+  mutate(perc = 100 * n / sum(n)) %>%
+  ungroup() %>% select(-n) %>%
+  pivot_wider(names_from = LhCSICat,
+              values_from = perc,
+              values_fill = list(perc = 0)) %>%
+  mutate_if(is.numeric, round, 1) %>%
+  #Apply the Cadre Harmonise rules for phasing the Livelihood Coping Strategies
+  mutate(stresscrisisemergency = StrategiesdeStress + StrategiesdeCrise + StrategiesdUrgence,
+         crisisemergency = StrategiesdeCrise + StrategiesdUrgence,
+         LhHCSCat_finalphase = case_when(
+           StrategiesdUrgence >= 20 ~ 4,
+           StrategiesdeCrise >= 20 & StrategiesdUrgence < 20 ~ 3,
+           Pasdestrategies < 80 & StrategiesdeCrise < 20 ~ 2,
+           Pasdestrategies >= 80 ~ 1)) %>%
+  select(ADMIN1Name, adm1_Pcod, ADMIN2Name, adm2_Pcod, LhHCSCat_NoStrategies = Pasdestrategies, LhHCSCat_StressStrategies = StrategiesdeStress, LhHCSCat_CrisisStategies = StrategiesdeCrise, LhHCSCat_EmergencyStrategies = StrategiesdUrgence, LhHCSCat_finalphase)
+
+#compile all the direct evidence and contributing factors and export the matrice intermediare excel sheet
+matrice_intermediaire_direct <- left_join(CH_FCSCat_table_wide, CH_HDDS_table_wide, by = c("ADMIN1Name", "adm1_Pcod", "ADMIN2Name", "adm2_Pcod")) %>%
+  left_join(CH_HHS_table_wide, by = c("ADMIN1Name", "adm1_Pcod", "ADMIN2Name", "adm2_Pcod")) %>%
+  left_join(CH_LhCSICat_table_wide, by = c("ADMIN1Name", "adm1_Pcod", "ADMIN2Name", "adm2_Pcod")) %>%
+  left_join(CH_rCSI_table_wide, by = c("ADMIN1Name", "adm1_Pcod", "ADMIN2Name", "adm2_Pcod"))
+
+# add in important other variables and reorder
+matrice_intermediaire_direct <- matrice_intermediaire_direct %>% mutate(ADMIN0Name = ADMIN0Name_value, adm0_pcod = adm0_pcod_value, Population = NA) %>%
+  select(ADMIN0Name, adm0_pcod, ADMIN1Name, ADMIN2Name, adm1_Pcod,	adm2_Pcod, Population, everything())
+
+
+#add in other variables
+matrice_intermediaire <- matrice_intermediaire_direct %>% mutate(`01_xxx`= NA,
+                                             `02_xxx`=NA,
+                                             `06_xxx`=NA,
+                                             `07_xxx`=NA,
+                                             `11_xxx`=NA,
+                                             `12_xxx`=NA,
+                                             `26_xxx`=NA,
+                                             `27_xxx`=NA,
+                                             `41_xxx`=NA,
+                                             `42_xxx`=NA,
+                                             `56_xxx`=NA,
+                                             `57_xxx`=NA,
+                                             Z1_DPME_C=NA,
+                                             Z1_DPME_pop_C=NA,
+                                             Z1_DS_C=NA,
+                                             Z1_Pop_DS_C=NA,
+                                             Z1_DPME_Pr=NA,
+                                             Z1_Pop_DPME_Pr=NA,
+                                             Z1_DS_Pr=NA,
+                                             Z1_pop_DS_Pr=NA,
+                                             Z2_DPME_C=NA,
+                                             Z2_DPME_pop_C=NA,
+                                             Z2_DS_C=NA,
+                                             Z2_Pop_DS_C=NA,
+                                             Z2_DPME_Pr=NA,
+                                             Z2_Pop_DPME_Pr=NA,	
+                                             Z2_DS_Pr=NA,
+                                             Z2_pop_DS_Pr=NA,
+                                             Z3_DPME_C=NA,
+                                             Z3_DPME_pop_C=NA,
+                                             Z3_DS_C=NA,
+                                             Z3_Pop_DS_C=NA,
+                                             Z3_DPME_Pr=NA,
+                                             Z3_Pop_DPME_Pr=NA,
+                                             Z3_DS_Pr=NA,
+                                             Z3_pop_DS_Pr=NA,
+                                             Z4_DPME_C=NA,
+                                             Z4_DPME_pop_C=NA,
+                                             Z4_DS_C=NA,
+                                             Z4_Pop_DS_C=NA,
+                                             Z4_DPME_Pr=NA,
+                                             Z4_Pop_DPME_Pr=NA,
+                                             Z4_DS_Pr=NA,
+                                             Z4_pop_DS_Pr=NA,
+                                             Proxy_cal=NA,
+                                             MAG_pt=NA,
+                                             IPC_AMN_curt=NA,
+                                             MAG_Pharv=NA,
+                                             MAG_Soud=NA,
+                                             IPC_AMN_prjt=NA,
+                                             IMC=NA,
+                                             MUAC=NA,
+                                             TBM=NA,
+                                             TMM5=NA)
+
+#8  compile all the direct evidence and contributing factors (and list of other variables) and export the matrice intermediare excel sheet
+#add in other columns that will be filled in manually in excel sheet
+#formats color of columns
+direct <- createStyle(fgFill = "#4F81BD", halign = "left", textDecoration = "Bold",
+                      border = "Bottom", fontColour = "white")
+contributifs <- createStyle(fgFill = "#FFC7CE", halign = "left", textDecoration = "Bold",
+                            border = "Bottom", fontColour = "black")
+hea <- createStyle(fgFill = "#C6EFCE", halign = "left", textDecoration = "Bold",
+                   border = "Bottom", fontColour = "black")
+nutrition <- createStyle(fgFill = "yellow", halign = "left", textDecoration = "Bold",
+                         border = "Bottom", fontColour = "black")
+mortalite <- createStyle(fgFill = "orange", halign = "left", textDecoration = "Bold",
+                         border = "Bottom", fontColour = "black")
+proxyvar <- createStyle(fgFill = "lightgreen", halign = "left", textDecoration = "Bold",
+                        border = "Bottom", fontColour = "black")
+#
+Matrice_intermediaire <- createWorkbook()
+addWorksheet(Matrice_intermediaire, "Matrice intermediaire")
+
+col1stDirectVariable <- which(colnames(matrice_intermediaire)=="FCG_Poor")
+colLastDirectVariable <- which(colnames(matrice_intermediaire)=="rCSI_finalphase")
+
+col1stFactCont <- which(colnames(matrice_intermediaire)=="01_xxx")
+colLastFactCont <- which(colnames(matrice_intermediaire)=="57_xxx")
+
+col1stHEAVariable <- which(colnames(matrice_intermediaire)=="Z1_DPME_C")
+colLastHEAVarible <- which(colnames(matrice_intermediaire)=="Z4_pop_DS_Pr")
+
+colLastproxycal <- which(colnames(matrice_intermediaire)=="Proxy_cal")
+
+col1stNutritionVariable <- which(colnames(matrice_intermediaire)=="MAG_pt")
+colLastNutritionVariable <- which(colnames(matrice_intermediaire)=="MUAC")
+
+col1stMortalityVariable <- which(colnames(matrice_intermediaire)=="TBM")
+colLastMortalityVariable <- which(colnames(matrice_intermediaire)=="TMM5")
+
+
+Matrice_intermediaire <- createWorkbook()
+
+addWorksheet(Matrice_intermediaire, "Matrice intermediaire")
+writeData(Matrice_intermediaire,sheet = 1,matrice_intermediaire,startRow = 1,startCol = 1,)
+addStyle(Matrice_intermediaire,1,rows = 1,cols = col1stDirectVariable:colLastDirectVariable
+         ,style = direct,gridExpand = TRUE,)
+addStyle(Matrice_intermediaire,1,rows = 1,cols =(colLastDirectVariable+1) :(col1stHEAVariable-1),
+         style = contributifs,gridExpand = TRUE,)
+addStyle(Matrice_intermediaire,1,rows = 1,cols =col1stHEAVariable :colLastHEAVarible,
+         style = hea,gridExpand = TRUE,)
+addStyle(Matrice_intermediaire,1,rows = 1,cols =col1stNutritionVariable :colLastNutritionVariable,
+         style = nutrition,gridExpand = TRUE,)
+addStyle(Matrice_intermediaire,1,rows = 1,cols =col1stNutritionVariable-1 ,
+         style = proxyvar,gridExpand = TRUE,)
+addStyle(Matrice_intermediaire,1,rows = 1,cols = col1stMortalityVariable:colLastMortalityVariable,
+         style = mortalite,gridExpand = TRUE,)
+
+saveWorkbook(Matrice_intermediaire,file ="Matrice_intermediaire.xlsx",overwrite = TRUE)
+
+
+#How to include contributing factors
+
+# #Renaming colnames before merging by colonne
+# # Pendant les six dernier mois, le minage a-t-il subi un choc? choc_subi
+# choc_subitable <- data %>% 
+#   group_by(adm1_name, adm2_name) %>%  mutate(indicator = "Pendant les six dernier mois, le minage a-t-il subi un choc?") %>%
+#   count(choc_subi) %>%
+#   drop_na() %>%
+#   mutate(n = 100 * n / sum(n)) %>%
+#   ungroup() %>%
+#   spread(key = choc_subi, value = n) %>% replace(., is.na(.), 0) %>% mutate_if(is.numeric, round, 1)
+# 
+# 
+# colnames(choc_subitable)[3:4] <- paste("01_choc_subi",colnames(choc_subitable)[3:4],sep = "_")
+# 
+# 
+
+
+
+
+
+
+
+
+
+
