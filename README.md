@@ -1,6 +1,6 @@
 # matricemakerrrrrrr
 
-This resource is a step a long the path to improve speed and accuracy in data processing in the Cadre Harmonise.  This script
+This resource is a step a long the path to improve speed and accuracy in data processing in the Cadre Harmonise.  This 
 [script](https://github.com/WFP-VAM/matricemaker/blob/main/makematrice.R) can produce a formatted excel version of the famous matrice intermediare [matrice intermediare](https://github.com/WFP-VAM/matricemaker/blob/main/Matrice_intermediaire.xlsx) given:
 - a household survey data file (usually SPSS format) using standardized variable names (https://wfp-vam.github.io/RBD_FS_CH_guide_FR/)  
 - variable names and categorization of contributing factors i.e - variable name = `q101a_chocs_subis_derniers6_mois` and it falls under `dangers/hazards section`
