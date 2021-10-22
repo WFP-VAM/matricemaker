@@ -10,3 +10,7 @@ This resource is a step a long the path to improve speed and accuracy in data pr
 - much more testing and work needed to make this  solid but  flexible enough - the hope is to turn a lot of things into functions and then later a package
 - currently only works for french version of the matrice intermediare
 
+## To try it out
+
+- experienced R users can try to use this resource as is , probably by first looking at the [sample dataset](), [script](https://github.com/WFP-VAM/matricemaker/blob/main/makematrice.R) and [matrice intermediare](https://github.com/WFP-VAM/matricemaker/blob/main/Matrice_intermediaire.xlsx)
+- currently only works for french version of the matrice intermediare
