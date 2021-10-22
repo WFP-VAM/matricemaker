@@ -12,5 +12,8 @@ This resource is a step a long the path to improve speed and accuracy in data pr
 
 ## To try it out
 
-- experienced R users can try to use this resource as is , probably by first looking at the [sample dataset](), [script](https://github.com/WFP-VAM/matricemaker/blob/main/makematrice.R) and [matrice intermediare](https://github.com/WFP-VAM/matricemaker/blob/main/Matrice_intermediaire.xlsx)
-- currently only works for french version of the matrice intermediare
+- experienced R users can try to use this resource as is , probably by first looking at the [sample dataset](https://github.com/WFP-VAM/matricemaker/blob/main/3_ProcessedData/exampledataFrancais_processed_plus.sav), [script](https://github.com/WFP-VAM/matricemaker/blob/main/makematrice.R) and [matrice intermediare](https://github.com/WFP-VAM/matricemaker/blob/main/Matrice_intermediaire.xlsx) - let us know how it goes and if you have some improvements -> rbd.ram@wfp.org 
+- alternately, RBD can generate the matrice intermediare for countries provided
+1. processed dataset is saved on datalibrary https://datalib.vam.wfp.org/
+2. variable names and values match the standards in the guide to standardization https://wfp-vam.github.io/RBD_FS_CH_guide_FR/
+3. variable names and classification (i.e. which category: danger, vulnerability, avalibility, access, utilization, stability) of contributing factor variables coming from household survey data
